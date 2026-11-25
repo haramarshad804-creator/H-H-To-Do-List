@@ -2,35 +2,10 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 
-const initialTasks = [
-  {
-    id: 1,
-    title: "Learn React Components",
-    description: "Understand JSX and functional components.",
-    date: "2026-11-26",
-    time: "10:00",
-    done: false,
-    created: new Date().toLocaleString()
-  },
-  {
-    id: 2,
-    title: "Practice useState Hook",
-    description: "Build a small counter application.",
-    date: "2026-11-27",
-    time: "12:00",
-    done: false,
-    created: new Date().toLocaleString()
-  },
-  {
-    id: 3,
-    title: "Learn useEffect Hook",
-    description: "Practice LocalStorage in React.",
-    date: "2026-11-28",
-    time: "15:00",
-    done: true,
-    created: new Date().toLocaleString()
-  }
-];
+// Your deployed backend URL
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://h-h-to-do-list-35hr.vercel.app";
 
 const emptyForm = {
   title: "",
@@ -39,23 +14,42 @@ const emptyForm = {
   time: ""
 };
 
-function App() {
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const saved = localStorage.getItem("hh-tasks");
-      return saved ? JSON.parse(saved) : initialTasks;
-    } catch {
-      return initialTasks;
-    }
-  });
+// Convert backend task into frontend task format
+const formatTask = (task) => ({
+  ...task,
+  done: Boolean(task.completed ?? task.done),
+  created: task.created || new Date().toLocaleString()
+});
 
+function App() {
+  const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
 
+  // Load tasks from backend
   useEffect(() => {
-    localStorage.setItem("hh-tasks", JSON.stringify(tasks));
-  }, [tasks]);
+    const fetchTasks = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/tasks`);
+
+        if (!response.ok) {
+          throw new Error("Unable to load tasks");
+        }
+
+        const data = await response.json();
+        setTasks(data.map(formatTask));
+      } catch (error) {
+        console.error("Backend error:", error);
+        alert("Backend se tasks load nahi ho sake. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTasks();
+  }, []);
 
   const completed = tasks.filter(task => task.done).length;
   const pending = tasks.length - completed;
@@ -71,7 +65,8 @@ function App() {
     });
   };
 
-  const handleSubmit = (e) => {
+  // Add or update task through backend
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!form.title.trim() || !form.date || !form.time) {
@@ -79,57 +74,153 @@ function App() {
       return;
     }
 
-    if (editingId !== null) {
-      setTasks(tasks.map(task =>
-        task.id === editingId
-          ? { ...task, ...form }
-          : task
-      ));
+    try {
+      if (editingId !== null) {
+        const oldTask = tasks.find(task => task.id === editingId);
 
-      setEditingId(null);
-    } else {
-      const newTask = {
-        ...form,
-        id: Date.now(),
-        done: false,
-        created: new Date().toLocaleString()
-      };
+        const response = await fetch(
+          `${API_URL}/api/tasks/${editingId}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              ...form,
+              completed: oldTask?.done || false
+            })
+          }
+        );
 
-      setTasks([newTask, ...tasks]);
+        if (!response.ok) {
+          throw new Error("Task update failed");
+        }
+
+        const updatedTask = await response.json();
+
+        setTasks(tasks.map(task =>
+          task.id === editingId
+            ? formatTask({
+                ...updatedTask,
+                description: form.description,
+                created: task.created
+              })
+            : task
+        ));
+
+        setEditingId(null);
+      } else {
+        const response = await fetch(`${API_URL}/api/tasks`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            title: form.title,
+            date: form.date,
+            time: form.time
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error("Task could not be added");
+        }
+
+        const newTask = await response.json();
+
+        setTasks([
+          formatTask({
+            ...newTask,
+            description: form.description,
+            created: new Date().toLocaleString()
+          }),
+          ...tasks
+        ]);
+      }
+
+      setForm(emptyForm);
+    } catch (error) {
+      console.error("Submit error:", error);
+      alert("Task save nahi hua. Please try again.");
     }
-
-    setForm(emptyForm);
   };
 
+  // Edit task
   const editTask = (task) => {
     setForm({
-      title: task.title,
-      description: task.description,
-      date: task.date,
-      time: task.time
+      title: task.title || "",
+      description: task.description || "",
+      date: task.date || "",
+      time: task.time || ""
     });
 
     setEditingId(task.id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const deleteTask = (id) => {
-    if (window.confirm("Are you sure you want to delete this task?")) {
+  // Delete task through backend
+  const deleteTask = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this task?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/tasks/${id}`, {
+        method: "DELETE"
+      });
+
+      if (!response.ok) {
+        throw new Error("Task delete failed");
+      }
+
       setTasks(tasks.filter(task => task.id !== id));
 
       if (editingId === id) {
         setEditingId(null);
         setForm(emptyForm);
       }
+    } catch (error) {
+      console.error("Delete error:", error);
+      alert("Task delete nahi hua. Please try again.");
     }
   };
 
-  const toggleTask = (id) => {
-    setTasks(tasks.map(task =>
-      task.id === id
-        ? { ...task, done: !task.done }
-        : task
-    ));
+  // Complete or uncomplete task through backend
+  const toggleTask = async (id) => {
+    const task = tasks.find(item => item.id === id);
+
+    if (!task) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/tasks/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          completed: !task.done
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Task status update failed");
+      }
+
+      const updatedTask = await response.json();
+
+      setTasks(tasks.map(item =>
+        item.id === id
+          ? formatTask({
+              ...updatedTask,
+              description: item.description,
+              created: item.created
+            })
+          : item
+      ));
+    } catch (error) {
+      console.error("Toggle error:", error);
+      alert("Task status update nahi hua. Please try again.");
+    }
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -235,7 +326,7 @@ function App() {
 
             <div>
               <h2>
-                {editingId ? "Edit Your Task" : "Create a New Task"}
+                {editingId !== null ? "Edit Your Task" : "Create a New Task"}
               </h2>
               <p>Add your next goal to the list</p>
             </div>
@@ -295,10 +386,10 @@ function App() {
             <div className="form-buttons">
 
               <button className="add-button" type="submit">
-                {editingId ? "✓ Update Task" : "＋ Add New Task"}
+                {editingId !== null ? "✓ Update Task" : "＋ Add New Task"}
               </button>
 
-              {editingId && (
+              {editingId !== null && (
                 <button
                   className="cancel-button"
                   type="button"
@@ -346,14 +437,17 @@ function App() {
           {/* Task List */}
           <div className="task-list">
 
-            {filteredTasks.length === 0 ? (
+            {loading ? (
+              <div className="empty-state">
+                <h3>Loading your tasks... 💗</h3>
+              </div>
+            ) : filteredTasks.length === 0 ? (
               <div className="empty-state">
                 <div>🌷</div>
                 <h3>No tasks found!</h3>
                 <p>Add a new task and make your day productive.</p>
               </div>
             ) : (
-
               filteredTasks.map(task => (
 
                 <article
@@ -413,7 +507,6 @@ function App() {
                 </article>
 
               ))
-
             )}
 
           </div>
